@@ -6,17 +6,20 @@ with deterministic template fallback if API key is missing or call fails.
 
 import json
 import os
+import warnings
 from dotenv import load_dotenv
 
 load_dotenv()
+warnings.filterwarnings("ignore")
+
 
 def _fallback_explanation(window, detection_result):
     """Fallback generator using facts dictionary directly."""
-    facts = detection_result.get("facts", {})
-    pattern = detection_result.get("pattern_type")
-    window_id = window.get("window_id", "Unknown")
+    facts = detection_result.get("facts", {}) if detection_result else {}
+    pattern = detection_result.get("pattern_type") if detection_result else None
+    window_id = window.get("window_id", "Unknown") if window else "Unknown"
     
-    if detection_result.get("predicted_label") == 0:
+    if detection_result and detection_result.get("predicted_label") == 0:
         return f"Window {window_id} appears normal with {facts.get('total_tx_count', 0)} transactions and no detected anomaly patterns."
         
     if pattern == "velocity_spike":
@@ -42,9 +45,14 @@ def explain_flag(window, detection_result):
     Calls Gemini API (gemini-2.5-flash, temp=0) to generate a 1-2 sentence explanation.
     Falls back gracefully to template if API key is missing or error occurs.
     """
+    if window is None:
+        window = {}
+    if detection_result is None:
+        detection_result = {}
+
     api_key = os.getenv("GEMINI_API_KEY")
     
-    if api_key and api_key.strip() != "" and api_key != "your_key_here":
+    if api_key and api_key.strip() and api_key != "your_key_here":
         prompt = (
             "You are an expert fraud investigator. Write a clear 1-2 sentence plain-language explanation "
             "for why this merchant transaction window was flagged. Cite exact numbers from the trigger facts.\n"
@@ -54,17 +62,16 @@ def explain_flag(window, detection_result):
             "Output ONLY the 1-2 sentence explanation without intro or quotes."
         )
 
-        # Attempt 1: google-genai SDK (genai.Client)
+        # Attempt 1: google-genai SDK (Client & Chat)
         try:
             from google import genai
+            from google.genai import types
             client = genai.Client(api_key=api_key)
-            response = client.models.generate_content(
-                model="gemini-2.5-flash",
-                contents=prompt,
-                config={"temperature": 0.0}
-            )
+            config = types.GenerateContentConfig(temperature=0.0)
+            chat = client.chats.create(model="gemini-2.5-flash", config=config)
+            response = chat.send_message(prompt)
             if response and response.text:
-                return response.text.strip()
+                return response.text.strip().strip('"')
         except Exception:
             pass
 
@@ -78,7 +85,7 @@ def explain_flag(window, detection_result):
                 generation_config={"temperature": 0.0}
             )
             if response and response.text:
-                return response.text.strip()
+                return response.text.strip().strip('"')
         except Exception:
             pass
 
