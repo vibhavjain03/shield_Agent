@@ -7,7 +7,7 @@ ShieldAgent is a pure-Python, high-precision fraud detection engine and interact
 ## 📐 Methodology
 
 To prevent data leakage and ensure an honest, un-biased evaluation:
-1. **Fixed Train/Test Split**: A synthetic dataset of 180 transaction windows was generated and split **70% / 30%** (`data/train.json` with 126 windows and `data/test.json` with 54 windows) using a fixed random seed (`42`).
+1. **Fixed Train/Test Split**: A synthetic dataset of 200 transaction windows (including 20 hard-case borderline windows) was generated and split **70% / 30%** (`data/train.json` with 140 windows and `data/test.json` with 60 windows) using a fixed random seed (`42`).
 2. **Train-Only Threshold Tuning**: All rule thresholds (velocity windows, off-hours windows, and card testing amounts) were tuned strictly on `data/train.json` using `detector.tune_thresholds()`.
 3. **Strict Out-of-Sample Evaluation**: `data/test.json` was kept strictly unseen during threshold tuning and evaluated only in `eval.py`.
 
@@ -15,7 +15,7 @@ To prevent data leakage and ensure an honest, un-biased evaluation:
 
 ## 📁 Project Structure
 
-- `generate_data.py`: Generates 180 synthetic transaction windows (~75% normal, ~25% fraud across 3 patterns, plus borderline normal flash-sale bursts) and saves fixed 70/30 train/test splits to `data/`.
+- `generate_data.py`: Generates 200 synthetic transaction windows (~70% normal, ~30% fraud across 3 patterns, plus borderline normal flash-sale bursts and subtle velocity spikes) and saves fixed 70/30 train/test splits to `data/`.
 - `detector.py`: Pure Python rule-based classifier (`classify_window`) evaluating velocity, off-hours activity, and card testing patterns with named threshold constants. Includes `tune_thresholds(train_data)` helper.
 - `explain.py`: Invokes Gemini LLM (`gemini-2.5-flash`, `temperature=0`) to generate 1-2 sentence plain-language explanations citing specific facts. Includes automatic fallback to template-based explanations if API key is absent or call fails.
 - `eval.py`: Loads `data/test.json` ONLY, evaluates performance metrics (Precision, Recall, F1, Confusion Matrix), computes operational analyst and uncaught fraud costs, prints summary, and writes `results.txt`.
@@ -68,26 +68,26 @@ cp .env.example .env
           SHIELDAGENT EVALUATION REPORT               
 ======================================================
 Evaluated Test Dataset : data\test.json
-Total Test Windows     : 54
+Total Test Windows     : 60
 
 --- PERFORMANCE METRICS ---
-Precision : 1.0000 (100.0%)
-Recall    : 1.0000 (100.0%)
-F1 Score  : 1.0000
+Precision : 0.8000 (80.0%)
+Recall    : 0.6667 (66.7%)
+F1 Score  : 0.7273
 
 --- CONFUSION MATRIX ---
-True Positives  (TP) : 15 (Correctly flagged fraud)
-False Positives (FP) :  0 (False alarms on normal windows)
+True Positives  (TP) : 12 (Correctly flagged fraud)
+False Positives (FP) :  3 (False alarms on normal windows)
 True Negatives  (TN) : 39 (Correctly passed normal windows)
-False Negatives (FN) :  0 (Missed fraud windows)
+False Negatives (FN) :  6 (Missed fraud windows)
 
 --- ESTIMATED OPERATIONAL & FRAUD COST ANALYSIS ---
 Assumptions:
   1. False Positive Cost: 15 minutes of analyst review time per FP ($15.00/FP)
-  2. False Negative Cost: Actual dollar volume of uncaught fraud (Avg tx amt in FN: $0.00)
+  2. False Negative Cost: Actual dollar volume of uncaught fraud (Avg tx amt in FN: $57.98)
 Calculated Costs:
-  - False Positive Cost (FP * $15) : $0.00 (0 analyst mins)
-  - False Negative Cost (Uncaught) : $0.00
-  - Total Estimated Financial Cost  : $0.00
+  - False Positive Cost (FP * $15) : $45.00 (45 analyst mins)
+  - False Negative Cost (Uncaught) : $2827.57
+  - Total Estimated Financial Cost  : $2872.57
 ======================================================
 ```

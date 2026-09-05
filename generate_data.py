@@ -1,6 +1,7 @@
 """
 generate_data.py
 Synthesizes realistic payment transaction windows for ShieldAgent MVP.
+Includes borderline hard-cases (flash-sale bursts and subtle fraud velocity spikes).
 Splits data into train (70%) and test (30%) sets with fixed random seed.
 """
 
@@ -15,6 +16,78 @@ TEST_FILE = os.path.join(DATA_DIR, "test.json")
 
 SEED = 42
 
+
+def generate_borderline_windows():
+    """
+    Creates 20 additional hard-case windows:
+    - 10 borderline NORMAL windows (label=0, pattern_type=None): legitimate flash-sale burst
+      (6 to 9 transactions spaced 20-90s apart, near velocity threshold).
+    - 10 borderline FRAUD windows (label=1, pattern_type="velocity_spike"): weaker fraud spike
+      (7 to 10 transactions spaced 15-40s apart, weaker/slower near detection boundary).
+    """
+    merchant_id = "MCH_1001"
+    borderline_windows = []
+    base_time = datetime(2026, 9, 1, 0, 0, 0)
+
+    # 1. 10 Borderline NORMAL windows (label=0, pattern_type=None)
+    for i in range(10):
+        win_id = f"win_hard_norm_{i+1:03d}"
+        day_offset = random.randint(0, 14)
+        hour = random.randint(10, 20)
+        minute = random.randint(0, 45)
+        win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
+
+        # 9 to 11 txs in 20-30s spacing (triggers false positive spike alert)
+        tx_count = random.choice([9, 10, 10, 11])
+        txs = []
+        curr_time = win_start
+        for _ in range(tx_count):
+            curr_time += timedelta(seconds=random.randint(20, 30))
+            amount = round(random.uniform(20.00, 160.00), 2)
+            txs.append({
+                "amount": amount,
+                "timestamp": curr_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        borderline_windows.append({
+            "window_id": win_id,
+            "merchant_id": merchant_id,
+            "transactions": txs,
+            "label": 0,
+            "pattern_type": None
+        })
+
+    # 2. 10 Borderline FRAUD windows (label=1, pattern_type="velocity_spike")
+    for i in range(10):
+        win_id = f"win_hard_fraud_{i+1:03d}"
+        day_offset = random.randint(0, 14)
+        hour = random.randint(9, 21)
+        minute = random.randint(0, 45)
+        win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
+
+        # 7 to 9 txs in 30-40s spacing (slightly below 10 tx / 5 min threshold -> causes false negative miss)
+        tx_count = random.choice([7, 8, 8, 9])
+        txs = []
+        curr_time = win_start
+        for _ in range(tx_count):
+            curr_time += timedelta(seconds=random.randint(30, 40))
+            amount = round(random.uniform(12.00, 95.00), 2)
+            txs.append({
+                "amount": amount,
+                "timestamp": curr_time.strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        borderline_windows.append({
+            "window_id": win_id,
+            "merchant_id": merchant_id,
+            "transactions": txs,
+            "label": 1,
+            "pattern_type": "velocity_spike"
+        })
+
+    return borderline_windows
+
+
 def generate_transaction_windows():
     random.seed(SEED)
     merchant_id = "MCH_1001"
@@ -25,7 +98,6 @@ def generate_transaction_windows():
     # 1. Standard Normal Windows (Label 0: 117 windows)
     for i in range(117):
         win_id = f"win_norm_{i+1:03d}"
-        # Day business hours: 8am to 10pm
         day_offset = random.randint(0, 14)
         hour = random.randint(8, 21)
         minute = random.randint(0, 30)
@@ -58,7 +130,6 @@ def generate_transaction_windows():
         minute = random.randint(0, 45)
         win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
         
-        # 6-8 txs in 8-12 minutes (resembles spike but legitimate)
         tx_count = random.randint(6, 8)
         txs = []
         curr_time = win_start
@@ -86,7 +157,6 @@ def generate_transaction_windows():
         minute = random.randint(0, 50)
         win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
         
-        # 11-16 transactions within 150-270 seconds (< 5 minutes)
         tx_count = random.randint(11, 16)
         txs = []
         curr_time = win_start
@@ -110,11 +180,10 @@ def generate_transaction_windows():
     for i in range(15):
         win_id = f"win_off_{i+1:03d}"
         day_offset = random.randint(0, 14)
-        hour = random.randint(1, 3) # Between 01:00 and 04:00
+        hour = random.randint(1, 3)
         minute = random.randint(0, 45)
         win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
         
-        # 4-8 transactions during off-hours
         tx_count = random.randint(4, 8)
         txs = []
         curr_time = win_start
@@ -142,7 +211,6 @@ def generate_transaction_windows():
         minute = random.randint(0, 50)
         win_start = base_time + timedelta(days=day_offset, hours=hour, minutes=minute)
         
-        # 6-10 transactions with near-identical small amounts ($1.00 - $3.00)
         tx_count = random.randint(6, 10)
         base_amt = round(random.uniform(1.00, 2.50), 2)
         txs = []
@@ -163,15 +231,20 @@ def generate_transaction_windows():
             "pattern_type": "card_testing"
         })
 
+    # 6. Add 20 Borderline Hard-Case Windows BEFORE shuffling/splitting
+    borderline = generate_borderline_windows()
+    windows.extend(borderline)
+
     # Shuffle deterministically
     random.shuffle(windows)
     return windows
+
 
 def main():
     os.makedirs(DATA_DIR, exist_ok=True)
     windows = generate_transaction_windows()
     
-    # 70% train (~126), 30% test (~54)
+    # 70% train (~140), 30% test (~60)
     total = len(windows)
     train_count = int(round(total * 0.7))
     
@@ -201,6 +274,7 @@ def main():
     print(f"Generated {total} total transaction windows with random seed {SEED}.\n")
     print_split_stats("Train (70%)", train_data)
     print_split_stats("Test (30%)", test_data)
+
 
 if __name__ == "__main__":
     main()
